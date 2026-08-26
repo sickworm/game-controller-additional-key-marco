@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "revision": 61,
+  "profile": {
+    "id": "default",
+    "name": "??"
+  },
+  "sources": {
+    "P1": "F9",
+    "P2": "F10",
+    "P3": "F11",
+    "P4": "F12"
+  },
+  "bindings": {
+    "P1": {
+      "mode": "hold",
+      "input": "DPadUp"
+    },
+    "P2": {
+      "mode": "hold",
+      "input": "DPadDown"
+    },
+    "P3": {
+      "mode": "hold",
+      "input": "DPadLeft"
+    },
+    "P4": {
+      "mode": "repeat",
+      "input": "X",
+      "initialDelayMs": 50,
+      "intervalMs": 65,
+      "stop": {
+        "kind": "whileHeld"
+      }
+    }
+  },
+  "xinputUser": 0
+}

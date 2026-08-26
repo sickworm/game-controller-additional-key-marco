@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "revision": 3,
+  "profile": {
+    "id": "default",
+    "name": "??"
+  },
+  "bindings": {
+    "P1": {
+      "mode": "hold",
+      "input": "DPadUp"
+    },
+    "P2": {
+      "mode": "hold",
+      "input": "DPadDown"
+    },
+    "P3": {
+      "mode": "hold",
+      "input": "DPadLeft"
+    },
+    "P4": {
+      "mode": "repeat",
+      "input": "X",
+      "initialDelayMs": 50,
+      "intervalMs": 65,
+      "stop": {
+        "kind": "whileHeld"
+      }
+    }
+  }
+}

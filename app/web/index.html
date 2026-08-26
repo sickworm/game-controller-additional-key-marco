@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GameSir 配置中心</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div><strong>GameSir G7 Pro</strong><span>虚拟 Xbox 配置中心</span></div>
+      <div class="topbar-actions">
+        <button id="language-toggle" class="language-toggle" type="button" aria-label="Switch language">English</button>
+        <div id="connection" class="connection offline">服务未连接</div>
+      </div>
+    </header>
+    <main>
+      <section class="status-strip" aria-label="运行状态">
+        <div><span>服务</span><strong id="service-status">检查中</strong></div>
+        <div><span>AHK</span><strong id="ahk-status">待接入</strong></div>
+        <div><span>XOutput</span><strong id="xoutput-status">待检查</strong></div>
+        <div><span>当前 revision</span><strong id="revision">-</strong></div>
+      </section>
+
+      <section class="macro-diagnostics" id="macro-diagnostics" hidden aria-live="polite">
+        <h2>宏诊断</h2>
+        <p id="macro-last-event">尚未收到宏事件。</p>
+        <p id="macro-active-actions">当前虚拟按键：无</p>
+        <ul id="macro-traces"></ul>
+      </section>
+
+      <section class="xoutput-protection" id="xoutput-protection" aria-live="polite">
+        <h2>XOutput 配置保护</h2>
+        <p id="xoutput-protection-status">正在检查 XOutput 配置文件。</p>
+        <div id="xoutput-protection-actions"></div>
+        <ul id="xoutput-backups"></ul>
+      </section>
+
+      <section class="toolbar" aria-label="配置档操作">
+        <label>配置档 <select id="profiles" aria-label="当前配置档"></select></label>
+        <button id="new-profile" type="button">新建配置档</button>
+        <button id="rename-profile" type="button">重命名</button>
+        <button id="delete-profile" type="button">删除</button>
+        <button id="export-profile" type="button">导出</button>
+        <label class="import-button">导入<input id="import-profile" type="file" accept="application/json,.json" hidden></label>
+        <label>实体槽位 <select id="xinput-user" aria-label="实体 GameSir 的 XInput 槽位"><option value="0">XInput #0</option><option value="1">XInput #1</option><option value="2">XInput #2</option><option value="3">XInput #3</option></select></label>
+        <span class="toolbar-spacer"></span>
+        <button id="macro-diagnostics-toggle" type="button" aria-expanded="false">宏诊断</button>
+        <button id="preflight" type="button" title="会启动或复用 AHK 与 XOutput，然后检查环境">检查环境</button>
+        <button id="stop-runtime" type="button">关闭本会话全部组件</button>
+        <button id="save" class="primary" type="button">保存配置</button>
+      </section>
+
+      <section class="workspace">
+        <div class="section-heading"><div><h1>背键映射</h1><p>配置档切换不会改变 Nexus 的键盘来源。</p></div><output id="save-state" aria-live="polite"></output></div>
+        <form id="bindings" novalidate></form>
+      </section>
+
+      <section class="preflight" id="preflight-result" hidden aria-live="polite"></section>
+    </main>
+    <template id="binding-template">
+      <article class="binding-row">
+        <div class="back-key"><strong></strong><span></span></div>
+        <label>键盘来源 <span class="source-control"><select class="source"></select><button type="button" class="capture-source">识别</button></span></label>
+        <label>动作 <select class="mode"><option value="tap">单次</option><option value="hold">按住</option><option value="repeat">连发</option><option value="macro">宏</option></select></label>
+        <label>Xbox 输入 <select class="input"></select></label>
+        <div class="repeat-fields" hidden><label>首次延迟 ms <input class="initial-delay" type="number" min="0" max="10000"></label><label>间隔 ms <input class="interval" type="number" min="0" max="10000"></label><label>停止 <select class="repeat-stop"><option value="whileHeld">松开停止</option><option value="count">固定次数</option></select></label><label class="count-wrap" hidden>次数 <input class="count" type="number" min="1" max="100"></label></div>
+        <div class="macro-editor" hidden><div class="macro-steps"></div><div class="macro-tools"><button type="button" class="add-press">添加按下</button><button type="button" class="add-release">添加释放</button><button type="button" class="add-wait">添加等待</button></div></div>
+      </article>
+    </template>
+    <script src="/i18n.js"></script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

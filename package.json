@@ -1,0 +1,10 @@
+{
+  "name": "gamesir-virtual-xbox-config-center",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node app/server/server.mjs",
+    "test": "node --test app/server/*.test.mjs"
+  }
+}

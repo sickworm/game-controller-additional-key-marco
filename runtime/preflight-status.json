@@ -1,0 +1,77 @@
+{
+  "id": "be86e05b-8b13-4452-875a-13622a9c2e0c",
+  "checkedAt": "2026-08-26T12:47:32.618Z",
+  "status": "failed",
+  "checks": [
+    {
+      "name": "AutoHotkey v2 (64-bit)",
+      "status": "pass",
+      "detail": "D:\\AutoHotkey\\v2\\AutoHotkey64.exe"
+    },
+    {
+      "name": "vJoy DLL",
+      "status": "pass",
+      "detail": "C:\\Program Files\\vJoy\\x64\\vJoyInterface.dll"
+    },
+    {
+      "name": "XOutput",
+      "status": "pass",
+      "detail": "D:\\codex_workspace\\tools\\XOutput-3.32\\XOutput.exe"
+    },
+    {
+      "name": "HidHide CLI",
+      "status": "pass",
+      "detail": "D:\\HidHide\\x64\\HidHideCLI.exe"
+    },
+    {
+      "name": "AHK 执行器",
+      "status": "pass",
+      "detail": "D:\\GitHub\\game-controller-additional-key-marco\\gamesir_merge_vjoy_f9_f12.ahk"
+    },
+    {
+      "name": "HidHide",
+      "status": "pass",
+      "detail": "Status check passed."
+    },
+    {
+      "name": "运行时配置",
+      "status": "pass",
+      "detail": "配置与背键来源有效。"
+    },
+    {
+      "name": "GameSir XInput slot",
+      "status": "fail",
+      "detail": "XInput #0 is disconnected. Select the physical GameSir slot, not a virtual output."
+    },
+    {
+      "name": "XOutput 进程",
+      "status": "pass",
+      "detail": "进程运行中，仍需在 XOutput 内确认输出。"
+    }
+  ],
+  "inputVerification": {
+    "P1": {
+      "status": "pending",
+      "expected": "F9"
+    },
+    "P2": {
+      "status": "pending",
+      "expected": "F10"
+    },
+    "P3": {
+      "status": "pending",
+      "expected": "F11"
+    },
+    "P4": {
+      "status": "pending",
+      "expected": "F12"
+    }
+  },
+  "xoutputConfirmation": {
+    "status": "required"
+  },
+  "manual": {
+    "status": "required",
+    "message": "请依次验证四个背键，然后在 XOutput 中点击 Controller 的 Start，确认其变为 Stop。"
+  }
+}
