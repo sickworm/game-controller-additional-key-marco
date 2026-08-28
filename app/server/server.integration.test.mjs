@@ -51,16 +51,47 @@ test("HTTP and WebSocket server endpoints are loopback-safe", async (t) => {
   const translations = await request(port, "/i18n.js");
   assert.equal(translations.status, 200);
   assert.match(translations.text, /gamesir-config-language/);
+  await writeFile(path.join(root, "runtime", "executor-status.ini"), `[executor]\nstate=running\nupdatedAt=${Date.now()}\nactionState=idle\nactiveRevision=1\nxinputUser=0\ninputState=connected\nvjoyState=acquired\n`);
+  const probeResponse = request(port, "/api/xinput/probe", {}, "POST");
+  const probeRequest = await waitForFile(path.join(root, "runtime", "xinput-probe-request.ini"));
+  const probeId = probeRequest.match(/id=([^\r\n]+)/)?.[1];
+  assert.ok(probeId);
+  const probeResult = `[probe]\r\nid=${probeId}\r\nstatus=complete\r\nvirtualUser=1\r\nslot0=connected\r\nslot1=connected\r\nslot2=connected\r\nslot3=disconnected\r\n`;
+  await writeFile(path.join(root, "runtime", "xinput-probe-result.ini"), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(probeResult, "utf16le")]));
+  const probed = await probeResponse;
+  assert.equal(probed.status, 200);
+  assert.equal(probed.json.data.virtualUser, 1);
+  assert.equal(probed.json.data.selectedUser, 0);
+  assert.equal(probed.json.data.autoSelected, false);
+  assert.equal(probed.json.data.ambiguous, true);
+  assert.deepEqual(probed.json.data.slots.map((slot) => slot.kind), ["physical-candidate", "xoutput-virtual", "physical-candidate", "disconnected"]);
+  const failedProbeResponse = request(port, "/api/xinput/probe", {}, "POST");
+  const failedProbeRequest = await waitForFileMatch(path.join(root, "runtime", "xinput-probe-request.ini"), (content) => !content.includes(probeId));
+  const failedProbeId = failedProbeRequest.match(/id=([^\r\n]+)/)?.[1];
+  assert.ok(failedProbeId);
+  await writeFile(path.join(root, "runtime", "xinput-probe-result.ini"), `[probe]\r\nid=${failedProbeId}\r\nstatus=error\r\nerror=SetAxis failed\r\n`);
+  const failedProbe = await failedProbeResponse;
+  assert.equal(failedProbe.status, 409);
+  assert.match(failedProbe.json.error.message, /SetAxis failed/);
+  const activityResponse = request(port, "/api/xinput/detect-physical", {}, "POST");
+  const activityRequest = await waitForFileMatch(path.join(root, "runtime", "xinput-probe-request.ini"), (content) => content.includes("mode=activity"));
+  const activityId = activityRequest.match(/id=([^\r\n]+)/)?.[1];
+  const activityResult = `[probe]\r\nid=${activityId}\r\nstatus=complete\r\nvirtualUser=-1\r\nphysicalUser=2\r\nslot0=connected\r\nslot1=disconnected\r\nslot2=connected\r\nslot3=disconnected\r\n`;
+  await writeFile(path.join(root, "runtime", "xinput-probe-result.ini"), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(activityResult, "utf16le")]));
+  const detected = await activityResponse;
+  assert.equal(detected.status, 200);
+  assert.equal(detected.json.data.selectedUser, 2);
+  assert.equal(detected.json.data.activityDetected, true);
   assert.equal((await request(port, "/../AGENTS.md")).status, 404);
   assert.equal((await request(port, "/api/status", { Origin: "http://example.test" })).status, 403);
 
   await writeFile(xoutputSettings, JSON.stringify(legacyKeyboardSettings()));
   const rolledBack = await request(port, "/api/status");
-  assert.equal(rolledBack.json.data.xoutputConfiguration.status, "rollback-detected");
+  assert.equal(rolledBack.json.data.xoutputConfiguration.status, "unsupported-input");
   const backupId = status.json.data.xoutputConfiguration.backups[0].id;
   const restored = await request(port, "/api/xoutput/configuration/restore", {}, "POST", { backupId });
   assert.equal(restored.status, 200);
-  assert.equal(JSON.parse(await readFile(xoutputSettings, "utf8")).Mapping[0].Mappings.LX.Mappers[0].InputDevice, "vJoy-guid");
+  assert.equal(JSON.parse(await readFile(xoutputSettings, "utf8")).Mapping[0].Mappings.LX.Mappers[0].InputDevice, "398d7d30-98e6-11f1-8002-444553540000");
 
   const event = await firstWebSocketEvent(port);
   assert.equal(event.type, "status.snapshot");
@@ -87,6 +118,25 @@ async function waitForHealth(port) {
   throw new Error("isolated server did not start");
 }
 
+async function waitForFile(filePath) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    try { return await readFile(filePath, "utf8"); } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`file was not created: ${filePath}`);
+}
+
+async function waitForFileMatch(filePath, predicate) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    try {
+      const content = await readFile(filePath, "utf8");
+      if (predicate(content)) return content;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`matching file content was not created: ${filePath}`);
+}
+
 function request(port, pathname, headers = {}, method = "GET", payload) {
   return new Promise((resolve, reject) => {
     const request = http.request({ host: "127.0.0.1", port, path: pathname, headers: payload ? { "Content-Type": "application/json", ...headers } : headers, method }, (response) => {
@@ -105,7 +155,7 @@ function request(port, pathname, headers = {}, method = "GET", payload) {
 
 function validXoutputSettings() {
   const mappings = {};
-  for (const input of ["A", "B", "X", "Y", "L1", "R1", "L3", "R3", "Start", "Back", "LX", "LY", "RX", "RY", "L2", "R2", "UP", "DOWN", "LEFT", "RIGHT"]) mappings[input] = { Mappers: [{ InputDevice: "vJoy-guid" }] };
+  for (const input of ["A", "B", "X", "Y", "L1", "R1", "L3", "R3", "Start", "Back", "LX", "LY", "RX", "RY", "L2", "R2", "UP", "DOWN", "LEFT", "RIGHT"]) mappings[input] = { Mappers: [{ InputDevice: "398d7d30-98e6-11f1-8002-444553540000" }] };
   return { Mapping: [{ Mappings: mappings }] };
 }
 
@@ -117,7 +167,11 @@ function firstWebSocketEvent(port) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
     const timer = setTimeout(() => { socket.close(); reject(new Error("WebSocket snapshot timeout")); }, 2000);
-    socket.onmessage = ({ data }) => { clearTimeout(timer); socket.close(); resolve(JSON.parse(data)); };
+    socket.onmessage = ({ data }) => {
+      const event = JSON.parse(data);
+      if (event.type !== "status.snapshot") return;
+      clearTimeout(timer); socket.close(); resolve(event);
+    };
     socket.onerror = () => { clearTimeout(timer); reject(new Error("WebSocket connection failed")); };
   });
 }

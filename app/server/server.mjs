@@ -15,6 +15,8 @@ const sockets = new Set();
 const pendingCaptures = new Set();
 const runtimeDir = path.join(rootDir, "runtime");
 const sessionPath = path.join(runtimeDir, "runtime-session.json");
+const xinputProbeRequestPath = path.join(runtimeDir, "xinput-probe-request.ini");
+const xinputProbeResultPath = path.join(runtimeDir, "xinput-probe-result.ini");
 // HidHide's existing allow-list registers the 64-bit executable.  Do not use
 // AutoHotkey.exe here: it can read keyboard hotkeys but not the cloaked GameSir.
 const AHK_EXE = resolveToolPath("GAMESIR_AHK_EXE", [
@@ -29,12 +31,17 @@ const XOUTPUT_EXE = resolveToolPath("GAMESIR_XOUTPUT_EXE", [
 ]);
 const XOUTPUT_SETTINGS = path.join(path.dirname(XOUTPUT_EXE), "settings.json");
 const XOUTPUT_BACKUP_DIR = path.join(runtimeDir, "xoutput-backups");
+// vJoy's DirectInput product GUID is stable for the supported driver. An
+// override supports installations whose vJoy driver exposes another GUID.
+const VJOY_DEVICE_GUID = (process.env.GAMESIR_VJOY_GUID ?? "398d7d30-98e6-11f1-8002-444553540000").toLowerCase();
 const HIDHIDE_CLI = resolveToolPath("GAMESIR_HIDHIDE_CLI", [
   "D:\\HidHide\\x64\\HidHideCLI.exe",
   "C:\\Program Files\\HidHide\\x64\\HidHideCLI.exe",
 ]);
 const AHK_SCRIPT = path.join(rootDir, "gamesir_merge_vjoy_f9_f12.ahk");
 let runtimeSession;
+let xinputProbePromise;
+let lastXinputProbeResult;
 
 await store.init();
 runtimeSession = await recoverRuntimeSession();
@@ -108,6 +115,8 @@ async function route(request, response, requestId) {
   if (request.method === "GET" && url.pathname === "/api/profiles") return json(response, 200, { data: await store.listProfiles() });
   if (request.method === "GET" && url.pathname === "/api/input-sources") return json(response, 200, { data: await store.readSources() });
   if (request.method === "GET" && url.pathname === "/api/device-settings") return json(response, 200, { data: await store.readDeviceSettings() });
+  if (request.method === "POST" && url.pathname === "/api/xinput/probe") return json(response, 200, { data: await probeXinputSlots() });
+  if (request.method === "POST" && url.pathname === "/api/xinput/detect-physical") return json(response, 200, { data: await detectPhysicalXinput() });
   if (request.method === "PUT" && url.pathname === "/api/device-settings") {
     const settings = await store.saveDeviceSettings(await body(request));
     broadcast("config.changed", await fullStatus());
@@ -239,10 +248,11 @@ function assessXoutputConfiguration(document) {
   const assigned = mappers.map((mapper) => mapper?.InputDevice).filter((input) => typeof input === "string" && input.length > 0);
   const blocked = assigned.filter((input) => /^(keyboard|mouse)$/i.test(input));
   const sources = [...new Set(assigned.filter((input) => !/^(keyboard|mouse)$/i.test(input)))];
-  if (blocked.length) return { status: "rollback-detected", detail: `检测到 ${blocked.length} 项 Keyboard/Mouse 旧映射；当前虚拟模式不能使用它。`, assigned: assigned.length, sources };
+  if (blocked.length) return { status: "unsupported-input", detail: `配置包含 ${blocked.length} 项 Keyboard/Mouse 输入；本链路只接受 vJoy Device 作为唯一输入来源。`, assigned: assigned.length, sources };
   if (assigned.length < 16) return { status: "incomplete", detail: `仅检测到 ${assigned.length} 项输入映射；完整 vJoy Controller 至少应有 16 项。`, assigned: assigned.length, sources };
   if (sources.length !== 1) return { status: "mixed-input", detail: `检测到 ${sources.length} 个 DirectInput 来源；虚拟模式必须只使用一只 vJoy Device。`, assigned: assigned.length, sources };
-  return { status: "protected", detail: `已验证 ${assigned.length} 项映射，且仅使用一个 DirectInput 来源。`, assigned: assigned.length, sources };
+  if (sources[0].toLowerCase() !== VJOY_DEVICE_GUID) return { status: "unexpected-input", detail: "配置使用的唯一 DirectInput 来源不是 vJoy Device；为避免把实体手柄直连配置误作可恢复备份，已拒绝保护。", assigned: assigned.length, sources };
+  return { status: "protected", detail: `已验证 ${assigned.length} 项 vJoy-only 映射。`, assigned: assigned.length, sources };
 }
 
 async function snapshotXoutputConfiguration({ document, required }) {
@@ -330,6 +340,88 @@ async function ahkStatus() {
       }])),
     },
   };
+}
+
+async function probeXinputSlots() {
+  if (xinputProbePromise) return xinputProbePromise;
+  xinputProbePromise = performXinputProbe().finally(() => { xinputProbePromise = undefined; });
+  return xinputProbePromise;
+}
+
+async function performXinputProbe() {
+  const ahk = await ahkStatus();
+  if (ahk.status !== "running") throw new ConfigError("AHK_OFFLINE", "AHK 执行器未连接，无法检测 XInput 槽位。", 409);
+  if (ahk.actionState === "busy") throw new ConfigError("AHK_BUSY", "宏或连发正在执行，暂不能检测 XInput 槽位。", 409);
+  const id = crypto.randomUUID();
+  const temporary = `${xinputProbeRequestPath}.${process.pid}.${id}.tmp`;
+  await writeFile(temporary, `[probe]\r\nid=${id}\r\nrequestedAt=${Date.now()}\r\n`, "utf8");
+  try { await rename(temporary, xinputProbeRequestPath); }
+  catch (error) { await unlink(temporary).catch(() => {}); throw error; }
+
+  let result;
+  const deadline = Date.now() + 4500;
+  while (Date.now() < deadline) {
+    const document = await readIni(xinputProbeResultPath);
+    if (document.probe?.id === id && ["complete", "error"].includes(document.probe.status)) { result = document.probe; break; }
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+  if (!result) throw new ConfigError("XINPUT_PROBE_TIMEOUT", "XInput 槽位检测超时，请确认 AHK 正在运行后重试。", 409);
+
+  if (result?.status === "error") throw new ConfigError("XINPUT_PROBE_FAILED", `AHK 槽位检测失败：${result.error || "未知脚本错误"}`, 409);
+  const virtualUser = Number(result.virtualUser);
+  const hasVirtual = Number.isInteger(virtualUser) && virtualUser >= 0 && virtualUser <= 3;
+  const slots = Array.from({ length: 4 }, (_, user) => {
+    const connected = result[`slot${user}`] === "connected";
+    if (!connected) return { user, connected: false, kind: "disconnected", selectable: false, reason: "未连接" };
+    if (hasVirtual && user === virtualUser) return { user, connected: true, kind: "xoutput-virtual", selectable: false, reason: "已确认是 XOutput 虚拟手柄" };
+    return { user, connected: true, kind: "physical-candidate", selectable: true, reason: "已连接的实体候选" };
+  });
+  const candidates = slots.filter((slot) => slot.selectable);
+  let selectedUser = (await store.readDeviceSettings()).xinputUser;
+  let autoSelected = false;
+  if (candidates.length === 1 && selectedUser !== candidates[0].user) {
+    await store.saveDeviceSettings({ xinputUser: candidates[0].user });
+    selectedUser = candidates[0].user;
+    autoSelected = true;
+    broadcast("config.changed", await fullStatus());
+  }
+  lastXinputProbeResult = {
+    id,
+    slots,
+    virtualUser: hasVirtual ? virtualUser : null,
+    selectedUser,
+    autoSelected,
+    ambiguous: candidates.length > 1,
+    detail: hasVirtual ? "已通过 vJoy 主动信号确认 XOutput 虚拟槽位。" : "未检测到 XOutput 虚拟槽位。",
+  };
+  return lastXinputProbeResult;
+}
+
+async function detectPhysicalXinput() {
+  const candidates = lastXinputProbeResult?.slots?.filter((slot) => slot.selectable).map((slot) => slot.user) ?? [];
+  if (candidates.length < 2) throw new ConfigError("XINPUT_ACTIVITY_NOT_NEEDED", "当前没有多个实体候选，无需活动识别。", 409);
+  const ahk = await ahkStatus();
+  if (ahk.status !== "running" || ahk.actionState === "busy") throw new ConfigError("AHK_NOT_READY", "AHK 当前无法开始实体手柄活动识别。", 409);
+  const id = crypto.randomUUID();
+  const temporary = `${xinputProbeRequestPath}.${process.pid}.${id}.tmp`;
+  await writeFile(temporary, `[probe]\r\nid=${id}\r\nmode=activity\r\ncandidates=${candidates.join(",")}\r\nrequestedAt=${Date.now()}\r\n`, "utf8");
+  try { await rename(temporary, xinputProbeRequestPath); }
+  catch (error) { await unlink(temporary).catch(() => {}); throw error; }
+  let result;
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const document = await readIni(xinputProbeResultPath);
+    if (document.probe?.id === id && ["complete", "error"].includes(document.probe.status)) { result = document.probe; break; }
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+  if (!result) throw new ConfigError("XINPUT_ACTIVITY_TIMEOUT", "实体手柄活动识别超时。", 409);
+  if (result?.status === "error") throw new ConfigError("XINPUT_ACTIVITY_FAILED", `AHK 实体手柄识别失败：${result.error || "未知脚本错误"}`, 409);
+  const physicalUser = Number(result.physicalUser);
+  if (!candidates.includes(physicalUser)) throw new ConfigError("XINPUT_ACTIVITY_NONE", "8 秒内未检测到明确的实体手柄操作，请重试并大幅移动摇杆或按下 A。", 409);
+  await store.saveDeviceSettings({ xinputUser: physicalUser });
+  lastXinputProbeResult = { ...lastXinputProbeResult, selectedUser: physicalUser, autoSelected: true, ambiguous: false, activityDetected: true };
+  broadcast("config.changed", await fullStatus());
+  return lastXinputProbeResult;
 }
 
 async function processStatus(name) {
@@ -425,7 +517,15 @@ async function startComponent(key) {
     ? { executable: AHK_EXE, args: [AHK_SCRIPT], image: "AutoHotkey64.exe", commandToken: AHK_SCRIPT }
     : { executable: XOUTPUT_EXE, args: [], image: "XOutput.exe", commandToken: XOUTPUT_EXE };
   const existing = runtimeSession.processes[key];
-  if (existing && await matchingProcess(existing)) return "already-managed";
+  if (existing && await matchingProcess(existing)) {
+    if (key !== "ahk") return "already-managed";
+    const scriptInfo = await stat(AHK_SCRIPT);
+    if (scriptInfo.mtimeMs <= new Date(existing.startedAt).getTime()) return "already-managed";
+    // A project script update must not leave a managed, older AHK executor
+    // alive.  Restart only our recorded process; HidHide and XOutput stay up.
+    const stopped = await stopAhk();
+    if (stopped !== "stopped-cleanly") return `restart-${stopped}`;
+  }
   if (existing) { delete runtimeSession.processes[key]; await saveRuntimeSession(); }
   if ((await processStatus(definition.image)).status === "running") return "unmanaged-running";
   await access(definition.executable);

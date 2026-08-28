@@ -5,16 +5,16 @@ let macroDiagnosticsOpen = false;
 const captureWaiters = new Map();
 const elements = { profiles: document.querySelector("#profiles"), bindings: document.querySelector("#bindings"), save: document.querySelector("#save"), state: document.querySelector("#save-state"), preflight: document.querySelector("#preflight-result"), macroDiagnostics: document.querySelector("#macro-diagnostics"), macroLastEvent: document.querySelector("#macro-last-event"), macroActiveActions: document.querySelector("#macro-active-actions"), macroTraces: document.querySelector("#macro-traces"), xoutputProtection: document.querySelector("#xoutput-protection"), xoutputProtectionStatus: document.querySelector("#xoutput-protection-status"), xoutputProtectionActions: document.querySelector("#xoutput-protection-actions"), xoutputBackups: document.querySelector("#xoutput-backups") };
 
-await load(); connect();
+await load(); probeXinputSlots(); connect();
 document.querySelector("#save").addEventListener("click", save);
 document.querySelector("#new-profile").addEventListener("click", createProfile);
 document.querySelector("#rename-profile").addEventListener("click", renameProfile);
 document.querySelector("#delete-profile").addEventListener("click", deleteProfile);
 document.querySelector("#export-profile").addEventListener("click", exportProfile);
 document.querySelector("#import-profile").addEventListener("change", importProfile);
-document.querySelector("#preflight").addEventListener("click", runPreflight);
-document.querySelector("#stop-runtime").addEventListener("click", stopRuntime);
 document.querySelector("#macro-diagnostics-toggle").addEventListener("click", toggleMacroDiagnostics);
+document.querySelector("#probe-xinput").addEventListener("click", probeXinputSlots);
+document.querySelector("#detect-physical-xinput").addEventListener("click", detectPhysicalXinput);
 elements.profiles.addEventListener("change", async () => { await api(`/api/profiles/${elements.profiles.value}/activate`, { method: "POST" }); await load(); });
 document.querySelector("#xinput-user").addEventListener("change", saveDeviceSettings);
 
@@ -94,6 +94,52 @@ async function deleteProfile() { if (!window.confirm(`删除配置档“${profil
 async function exportProfile() { const exported = await api(`/api/profiles/${profile.profile.id}/export`); const url = URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" })); const anchor = Object.assign(document.createElement("a"), { href: url, download: `${exported.profile.id}.json` }); anchor.click(); URL.revokeObjectURL(url); }
 async function importProfile(event) { const [file] = event.target.files; if (!file) return; try { await api("/api/profiles/import", { method: "POST", body: { profile: JSON.parse(await file.text()) } }); await load(); } catch (error) { elements.state.textContent = error.message; } finally { event.target.value = ""; } }
 async function saveDeviceSettings(event) { try { await api("/api/device-settings", { method: "PUT", body: { xinputUser: Number(event.target.value) } }); elements.state.textContent = "实体槽位已保存，等待 AHK 安全加载"; } catch (error) { elements.state.textContent = error.message; } }
+async function probeXinputSlots() {
+  const select = document.querySelector("#xinput-user");
+  const button = document.querySelector("#probe-xinput");
+  button.disabled = true;
+  select.replaceChildren(...Array.from({ length: 4 }, (_, user) => option(String(user), `XInput #${user} — 检测中`, user === Number(select.value))));
+  for (const item of select.options) item.disabled = true;
+  elements.state.textContent = "正在主动检测 XInput 槽位…";
+  try {
+    const result = await api("/api/xinput/probe", { method: "POST" });
+    renderXinputProbeResult(result);
+    elements.state.textContent = result.autoSelected
+      ? `已自动选择 XInput #${result.selectedUser}；${result.detail}`
+      : result.ambiguous
+        ? `${result.detail} 检测到多个实体候选，请选择正在使用的 GameSir。`
+        : result.detail;
+  } catch (error) {
+    select.replaceChildren(...Array.from({ length: 4 }, (_, user) => {
+      const item = option(String(user), `XInput #${user} — 无法检测：${error.message}`, user === Number(select.value));
+      item.disabled = true;
+      return item;
+    }));
+    elements.state.textContent = error.message;
+  } finally { button.disabled = false; }
+}
+function renderXinputProbeResult(result) {
+  const select = document.querySelector("#xinput-user");
+  select.replaceChildren(...result.slots.map((slot) => {
+    const item = option(String(slot.user), `XInput #${slot.user} — ${slot.reason}`, slot.user === result.selectedUser);
+    item.disabled = !slot.selectable;
+    item.title = slot.reason;
+    return item;
+  }));
+  select.value = String(result.selectedUser);
+  document.querySelector("#detect-physical-xinput").hidden = !result.ambiguous;
+}
+async function detectPhysicalXinput() {
+  const button = document.querySelector("#detect-physical-xinput");
+  button.disabled = true;
+  elements.state.textContent = "请在 8 秒内大幅移动 GameSir 摇杆或按下 A…";
+  try {
+    const result = await api("/api/xinput/detect-physical", { method: "POST" });
+    renderXinputProbeResult(result);
+    elements.state.textContent = `已根据输入活动自动选择 XInput #${result.selectedUser}`;
+  } catch (error) { elements.state.textContent = error.message; }
+  finally { button.disabled = false; }
+}
 async function captureSource(row) { const button = row.querySelector(".capture-source"); button.disabled = true; elements.state.textContent = `请在 20 秒内按下背键 ${row.dataset.key.slice(1)}`; try { const capture = await api("/api/input-sources/capture", { method: "POST", body: { logical: row.dataset.key } }); const result = await waitCapture(capture.id); if (result.status !== "success") throw new Error(result.status === "timeout" ? "背键识别超时。" : result.message ?? "背键识别失败。"); sources = result.sources; row.querySelector(".source").value = result.source; row.querySelector(".back-key span").textContent = `当前 ${result.source}`; elements.state.textContent = `已识别并应用 ${result.source}`; } catch (error) { elements.state.textContent = error.message; } finally { button.disabled = false; } }
 async function verifyPreflightKey(logical, expectedSource, button) {
   button.disabled = true; button.textContent = "正在等待按键…";
@@ -111,15 +157,13 @@ async function verifyPreflightKey(logical, expectedSource, button) {
   finally { button.disabled = false; button.textContent = "重新验证"; }
 }
 function waitCapture(id) { return new Promise((resolve, reject) => { const fallback = setTimeout(async () => { try { resolve(await api(`/api/input-sources/capture/${id}`)); } catch (error) { reject(error); } finally { captureWaiters.delete(id); } }, 22000); captureWaiters.set(id, { resolve, reject, fallback }); }); }
-async function runPreflight() { elements.state.textContent = "正在启动或复用 AHK 与 XOutput，然后检查环境…"; try { const result = await api("/api/runtime/check-environment", { method: "POST" }); showPreflight(result.report); elements.state.textContent = `环境检查完成：AHK ${result.components.ahk}；XOutput ${result.components.xoutput}。`; } catch (error) { elements.state.textContent = `环境检查失败：${error.message}`; } }
-async function stopRuntime() { try { const result = await api("/api/runtime/stop", { method: "POST" }); elements.state.textContent = Object.entries(result).map(([name, status]) => `${name}: ${status}`).join("，"); } catch (error) { elements.state.textContent = error.message; } }
 function showPreflight(report) {
   const checks = report.checks ?? [];
   const slot = checks.find((check) => check.name === "GameSir XInput slot");
   const keys = Object.entries(report.inputVerification ?? {});
   const allKeysVerified = keys.length > 0 && keys.every(([, check]) => check.status === "pass");
   const nodes = [Object.assign(document.createElement("h2"), { textContent: report.status === "passed" ? "设置完成：可使用虚拟 Xbox" : "按以下步骤完成设置" })];
-  if (slot?.status === "fail") nodes.push(Object.assign(document.createElement("p"), { className: "blocking", textContent: "阻断：AHK 未连接到实体 GameSir，背键验证不会收到任何按键。请在上方“实体槽位”依次选择 XInput #1、#2、#3，保存后重新点击“检查环境”，直到这里显示“已连接”。" }));
+  if (slot?.status === "fail") nodes.push(Object.assign(document.createElement("p"), { className: "blocking", textContent: "阻断：AHK 未连接到实体 GameSir，背键验证不会收到任何按键。请在上方选择实体槽位并保存，然后点击“重新检测槽位”，直到状态显示“实体已连接”。" }));
   const checkTitle = Object.assign(document.createElement("h3"), { textContent: "第 1 步：设备与执行链路" });
   nodes.push(checkTitle, list(checks.map((check) => `${check.name}: ${check.detail}`), checks.map((check) => check.status)));
   const keyTitle = Object.assign(document.createElement("h3"), { textContent: "第 2 步：逐个验证背键" });

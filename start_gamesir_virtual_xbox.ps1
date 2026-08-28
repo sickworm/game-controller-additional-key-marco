@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $port = if ($env:PORT) { [int]$env:PORT } else { 3780 }
 $baseUrl = "http://127.0.0.1:$port"
@@ -25,6 +25,26 @@ function Show-StartupError([string]$reason) {
   Read-Host 'Press Enter to exit' | Out-Null
 }
 
+function Write-CoreRuntimeStatus($state, [switch]$Force) {
+  if ($null -eq $state) {
+    $key = 'service=unavailable'
+    if (-not $Force -and $script:lastCoreStatusKey -eq $key) { return }
+    $script:lastCoreStatusKey = $key
+    Write-Host "  [$((Get-Date).ToString('HH:mm:ss'))] 状态服务：不可用" -ForegroundColor Red
+    return
+  }
+  $ahk = switch ($state.ahk.status) { 'running' { '运行中' } 'degraded' { '配置异常' } default { '未运行' } }
+  $input = if ($state.ahk.inputState -eq 'connected') { '已连接' } else { '已断开' }
+  $xoutput = if ($state.xoutput.status -eq 'running') { '运行中' } else { '未运行' }
+  $key = "ahk=$($state.ahk.status);input=$($state.ahk.inputState);xoutput=$($state.xoutput.status)"
+  if (-not $Force -and $script:lastCoreStatusKey -eq $key) { return }
+  $script:lastCoreStatusKey = $key
+  $stamp = (Get-Date).ToString('HH:mm:ss')
+  Write-Host "  [$stamp] AHK 执行器：$ahk"
+  Write-Host "  [$stamp] 实体 GameSir XInput：$input"
+  Write-Host "  [$stamp] XOutput：$xoutput"
+}
+
 try {
   try { $status = (Invoke-RestMethod -TimeoutSec 1 "$baseUrl/api/status").data } catch { $status = $null }
   $owned = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Where-Object { $_.CommandLine -like "*$serverPath*" }
@@ -48,6 +68,29 @@ try {
     }
     throw $reason
   }
+  # Slot probing is safe only while the launcher is starting: AHK briefly
+  # pauses forwarding and writes a vJoy signature to identify XOutput.  A
+  # unique physical candidate is saved automatically; otherwise preserve the
+  # user's existing slot and let the Configuration Center resolve it.
+  $slotProbe = $null
+  $slotProbeNote = 'not detected; open Configuration Center to choose a physical slot'
+  try {
+    $slotProbe = (Invoke-RestMethod -Method Post -TimeoutSec 8 "$baseUrl/api/xinput/probe").data
+    $candidates = @($slotProbe.slots | Where-Object { $_.selectable })
+    if ($slotProbe.autoSelected) {
+      $slotProbeNote = "auto-selected XInput #$($slotProbe.selectedUser)"
+    } elseif ($candidates.Count -eq 0) {
+      $slotProbeNote = 'no physical XInput slot detected; existing selection was kept'
+    } elseif ($candidates.Count -gt 1) {
+      $slotProbeNote = 'multiple physical candidates; existing selection was kept'
+    } else {
+      $slotProbeNote = "using existing XInput #$($slotProbe.selectedUser)"
+    }
+  } catch {
+    # Do not make a non-destructive convenience probe prevent virtual mode
+    # from starting.  Its full diagnostic remains available in the page.
+    $slotProbeNote = 'probe unavailable; existing selection was kept'
+  }
   $state = (Invoke-RestMethod -TimeoutSec 3 "$baseUrl/api/status").data
   Clear-Host
   Write-Host '======================================================================'
@@ -59,6 +102,7 @@ try {
   Write-Host '    HidHide cloak  : enabled'
   Write-Host "    AHK + vJoy     : $($state.ahk.status)"
   Write-Host "    XOutput        : $($state.xoutput.status)"
+  Write-Host "    Physical slot  : $slotProbeNote"
   Write-Host '    Virtual Xbox   : confirm Controller shows Stop in XOutput'
   Write-Host ''
   Write-Host '  Keyboard controls'
@@ -68,11 +112,24 @@ try {
   Write-Host '  Keep this window open while virtual mode is in use.'
   Write-Host '======================================================================'
   $raw = $Host.UI.RawUI
+  $script:lastCoreStatusKey = $null
+  Write-Host ''
+  Write-Host '  Core runtime log (prints only when status changes)'
+  Write-CoreRuntimeStatus $state -Force
+  $nextStatusPollAt = [DateTime]::UtcNow
   while ($true) {
-    $key = $raw.ReadKey('NoEcho,IncludeKeyDown')
-    $ctrl = ($key.ControlKeyState -band 12) -ne 0
-    if ($ctrl -and $key.VirtualKeyCode -eq 73) { Start-Process "$baseUrl/"; Write-Host ''; Write-Host 'Configuration Center opened.' }
-    if ($ctrl -and $key.VirtualKeyCode -eq 90) { break }
+    if ($raw.KeyAvailable) {
+      $key = $raw.ReadKey('NoEcho,IncludeKeyDown')
+      $ctrl = ($key.ControlKeyState -band 12) -ne 0
+      if ($ctrl -and $key.VirtualKeyCode -eq 73) { Start-Process "$baseUrl/"; Write-Host ''; Write-Host 'Configuration Center opened.' }
+      if ($ctrl -and $key.VirtualKeyCode -eq 90) { break }
+    }
+    if ([DateTime]::UtcNow -ge $nextStatusPollAt) {
+      try { Write-CoreRuntimeStatus (Invoke-RestMethod -TimeoutSec 1 "$baseUrl/api/status").data }
+      catch { Write-CoreRuntimeStatus $null }
+      $nextStatusPollAt = [DateTime]::UtcNow.AddSeconds(1)
+    }
+    Start-Sleep -Milliseconds 50
   }
   Write-Host ''
   Write-Host 'Stopping virtual mode...'

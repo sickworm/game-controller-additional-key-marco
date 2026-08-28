@@ -11,6 +11,8 @@ RELOAD_REQUEST := A_ScriptDir "\runtime\reload-request.json"
 EXIT_REQUEST := A_ScriptDir "\runtime\exit-request.json"
 CAPTURE_REQUEST := A_ScriptDir "\runtime\capture-request.ini"
 CAPTURE_RESULT := A_ScriptDir "\runtime\capture-result.ini"
+XINPUT_PROBE_REQUEST := A_ScriptDir "\runtime\xinput-probe-request.ini"
+XINPUT_PROBE_RESULT := A_ScriptDir "\runtime\xinput-probe-result.ini"
 STATUS_INI := A_ScriptDir "\runtime\executor-status.ini"
 BACK_DPAD := Map("DPadUp", 0x0001, "DPadDown", 0x0002, "DPadLeft", 0x0004, "DPadRight", 0x0008)
 ; This is the sole Xbox action -> vJoy button map. Both physical XInput
@@ -45,6 +47,8 @@ vjoyReady := false
 povMode := ""
 lastReloadRequestAt := ""
 lastExitRequestAt := ""
+lastXinputProbeId := ""
+xinputProbeActive := false
 
 Main()
 
@@ -71,6 +75,10 @@ ResetVJD(id) => DllCall("vJoyInterface\ResetVJD", "UInt", id, "Int")
 
 Main() {
     global
+    ; Status is generated data.  Recreate it on each executor start so an old
+    ; multi-line error can never be mistaken for the new executor state.
+    if FileExist(STATUS_INI)
+        FileDelete STATUS_INI
     IniWrite "starting", STATUS_INI, "executor", "state"
     IniWrite ProcessExist(), STATUS_INI, "executor", "pid"
     IniWrite UnixMs(), STATUS_INI, "executor", "updatedAt"
@@ -105,6 +113,7 @@ Main() {
     SetTimer Poll, POLL_MS
     SetTimer CheckConfig, 250
     SetTimer CheckCapture, 250
+    SetTimer CheckXinputProbe, 250
     SetTimer WriteStatus, 1000
     OnExit Cleanup
     WriteStatus()
@@ -121,6 +130,8 @@ FailAndExit(message) {
 
 Poll(*) {
     global
+    if xinputProbeActive
+        return
     if DllCall(xiMod "\XInputGetState", "UInt", xuser, "Ptr", stateBuf, "UInt") != 0 {
         if inputConnected
             ClearSynthetic()
@@ -146,6 +157,154 @@ Poll(*) {
         SetDiscPov(vjoyID, pov)
     else
         SetContPov(vjoyID, pov)
+}
+
+CheckXinputProbe(*) {
+    global
+    if xinputProbeActive || AnyBackActionActive() || !FileExist(XINPUT_PROBE_REQUEST)
+        return
+    id := IniRead(XINPUT_PROBE_REQUEST, "probe", "id", "")
+    if id = "" || id = lastXinputProbeId
+        return
+    lastXinputProbeId := id
+    mode := IniRead(XINPUT_PROBE_REQUEST, "probe", "mode", "probe")
+    try {
+        if mode = "activity"
+            DetectPhysicalXinput(id, IniRead(XINPUT_PROBE_REQUEST, "probe", "candidates", ""))
+        else
+            ProbeXinputSlots(id)
+        if InStr(executorError, "xinput-probe-failed:") = 1
+            executorError := ""
+    } catch as probeError {
+        ; Do not leave the browser waiting for a timeout when a probe fails.
+        ; Forwarding remains alive and the actual AHK failure is reported.
+        xinputProbeActive := false
+        detail := probeError.Message " | what=" probeError.What " | line=" probeError.Line " | extra=" probeError.Extra
+        detail := StrReplace(StrReplace(detail, "`r", " "), "`n", " ")
+        executorError := "xinput-probe-failed: " detail
+        WriteXinputProbeResult(id, ["unknown", "unknown", "unknown", "unknown"], -1, -1, "error", detail)
+    }
+}
+
+ProbeXinputSlots(id) {
+    global
+    xinputProbeActive := true
+    slots := ["disconnected", "disconnected", "disconnected", "disconnected"]
+    virtualUser := -1
+    try {
+        ClearSynthetic()
+        ResetVJD(vjoyID)
+        Sleep 160
+        Loop 4 {
+            user := A_Index - 1
+            slots[A_Index] := ReadXinputState(user) ? "connected" : "disconnected"
+        }
+
+        ; Use an unlikely four-axis signature. Polling is paused while probing so
+        ; only XOutput's vJoy-backed virtual controller can mirror this state.
+        signature := {lx: 22000, ly: -17000, rx: -13000, ry: 19000}
+        SetAxis(XInputToVjoy(signature.lx, AX["X"]), vjoyID, AX["X"])
+        SetAxis(XInputToVjoy(-signature.ly, AX["Y"]), vjoyID, AX["Y"])
+        SetAxis(XInputToVjoy(signature.rx, AX["Rx"]), vjoyID, AX["Rx"])
+        SetAxis(XInputToVjoy(-signature.ry, AX["Ry"]), vjoyID, AX["Ry"])
+        Loop 6 {
+            Sleep 45
+            Loop 4 {
+                user := A_Index - 1
+                state := ReadXinputState(user)
+                if state && XinputMatchesSignature(state, signature) {
+                    virtualUser := user
+                    break
+                }
+            }
+            if virtualUser >= 0
+                break
+        }
+    } finally {
+        ResetVJD(vjoyID)
+        Sleep 80
+        xinputProbeActive := false
+    }
+    WriteXinputProbeResult(id, slots, virtualUser)
+}
+
+ReadXinputState(user) {
+    global xiMod
+    stateBuffer := Buffer(16, 0)
+    if DllCall(xiMod "\XInputGetState", "UInt", user, "Ptr", stateBuffer, "UInt") != 0
+        return false
+    return {buttons: NumGet(stateBuffer, 4, "UShort"), lt: NumGet(stateBuffer, 6, "UChar"), rt: NumGet(stateBuffer, 7, "UChar"), lx: NumGet(stateBuffer, 8, "Short"), ly: NumGet(stateBuffer, 10, "Short"), rx: NumGet(stateBuffer, 12, "Short"), ry: NumGet(stateBuffer, 14, "Short")}
+}
+
+XinputMatchesSignature(state, signature) {
+    tolerance := 4500
+    return Abs(state.lx - signature.lx) <= tolerance
+        && Abs(state.ly - signature.ly) <= tolerance
+        && Abs(state.rx - signature.rx) <= tolerance
+        && Abs(state.ry - signature.ry) <= tolerance
+}
+
+DetectPhysicalXinput(id, candidateText) {
+    global
+    candidates := []
+    for _, value in StrSplit(candidateText, ",") {
+        if RegExMatch(value, "^[0-3]$")
+            candidates.Push(Integer(value))
+    }
+    slots := ["disconnected", "disconnected", "disconnected", "disconnected"]
+    baselines := Map()
+    physicalUser := -1
+    xinputProbeActive := true
+    try {
+        ClearSynthetic()
+        ResetVJD(vjoyID)
+        Sleep 140
+        for _, user in candidates {
+            state := ReadXinputState(user)
+            if state {
+                slots[user + 1] := "connected"
+                baselines[user] := state
+            }
+        }
+        deadline := A_TickCount + 8000
+        while A_TickCount < deadline && physicalUser < 0 {
+            for _, user in candidates {
+                if !baselines.Has(user)
+                    continue
+                state := ReadXinputState(user)
+                if state && XinputActivityChanged(baselines[user], state) {
+                    physicalUser := user
+                    break
+                }
+            }
+            Sleep 20
+        }
+    } finally {
+        ResetVJD(vjoyID)
+        Sleep 80
+        xinputProbeActive := false
+    }
+    WriteXinputProbeResult(id, slots, -1, physicalUser)
+}
+
+XinputActivityChanged(before, after) {
+    return before.buttons != after.buttons
+        || Abs(before.lt - after.lt) >= 35 || Abs(before.rt - after.rt) >= 35
+        || Abs(before.lx - after.lx) >= 7000 || Abs(before.ly - after.ly) >= 7000
+        || Abs(before.rx - after.rx) >= 7000 || Abs(before.ry - after.ry) >= 7000
+}
+
+WriteXinputProbeResult(id, slots, virtualUser, physicalUser := -1, status := "complete", errorMessage := "") {
+    global XINPUT_PROBE_RESULT
+    temp := XINPUT_PROBE_RESULT ".tmp"
+    try FileDelete temp
+    content := "[probe]`r`nid=" id "`r`nstatus=" status "`r`nvirtualUser=" virtualUser "`r`nphysicalUser=" physicalUser "`r`n"
+    if errorMessage != ""
+        content .= "error=" StrReplace(StrReplace(errorMessage, "`r", " "), "`n", " ") "`n"
+    Loop 4
+        content .= "slot" (A_Index - 1) "=" slots[A_Index] "`r`n"
+    FileAppend content, temp, "UTF-8-RAW"
+    FileMove temp, XINPUT_PROBE_RESULT, 1
 }
 
 LoadConfig(force := false) {
@@ -588,7 +747,7 @@ WriteStatus(*) {
     IniWrite ProcessExist(), STATUS_INI, "executor", "pid"
     IniWrite configRevision, STATUS_INI, "executor", "activeRevision"
     IniWrite (AnyBackActionActive() ? "busy" : "idle"), STATUS_INI, "executor", "actionState"
-    IniWrite executorError, STATUS_INI, "executor", "error"
+    IniWrite StrReplace(StrReplace(executorError, "`r", " "), "`n", " "), STATUS_INI, "executor", "error"
     IniWrite xuser, STATUS_INI, "executor", "xinputUser"
     IniWrite (inputConnected ? "connected" : "disconnected"), STATUS_INI, "executor", "inputState"
     IniWrite (vjoyReady ? "acquired" : "unavailable"), STATUS_INI, "executor", "vjoyState"

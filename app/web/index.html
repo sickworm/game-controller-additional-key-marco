@@ -43,11 +43,11 @@
         <button id="delete-profile" type="button">删除</button>
         <button id="export-profile" type="button">导出</button>
         <label class="import-button">导入<input id="import-profile" type="file" accept="application/json,.json" hidden></label>
-        <label>实体槽位 <select id="xinput-user" aria-label="实体 GameSir 的 XInput 槽位"><option value="0">XInput #0</option><option value="1">XInput #1</option><option value="2">XInput #2</option><option value="3">XInput #3</option></select></label>
+        <label>实体槽位 <select id="xinput-user" aria-label="实体 GameSir 的 XInput 槽位"><option value="0" disabled>XInput #0 — 检测中</option><option value="1" disabled>XInput #1 — 检测中</option><option value="2" disabled>XInput #2 — 检测中</option><option value="3" disabled>XInput #3 — 检测中</option></select></label>
+        <button id="probe-xinput" type="button">重新检测槽位</button>
+        <button id="detect-physical-xinput" type="button" hidden>识别实体手柄（移动摇杆）</button>
         <span class="toolbar-spacer"></span>
         <button id="macro-diagnostics-toggle" type="button" aria-expanded="false">宏诊断</button>
-        <button id="preflight" type="button" title="会启动或复用 AHK 与 XOutput，然后检查环境">检查环境</button>
-        <button id="stop-runtime" type="button">关闭本会话全部组件</button>
         <button id="save" class="primary" type="button">保存配置</button>
       </section>
 
