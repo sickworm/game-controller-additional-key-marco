@@ -1,42 +1,62 @@
 # GameSir G7 Pro 背键 → 虚拟 Xbox
 
-将 GameSir Nexus 固定输出的四个背键 `F9`–`F12` 合并到一只虚拟 Xbox 手柄。
+[简体中文](./README.md) | [English](./README.en.md)
+
+本项目让 GameSir G7 Pro 的四个背键执行可配置的标准 Xbox/XInput 动作，同时让游戏只看到一只虚拟 Xbox 手柄。
 
 ```text
-实体 GameSir + F9-F12 背键
-             ↓
-       AutoHotkey 合并
-             ↓
-        vJoy Device 1
-             ↓
-          XOutput
-             ↓
-       一只虚拟 Xbox
+GameSir Nexus（背键输出 F9-F12）
+  → AutoHotkey（合并实体输入与背键动作）
+  → vJoy Device 1
+  → XOutput
+  → 虚拟 Xbox/XInput 手柄
 ```
 
-日常使用运行 [start_gamesir_virtual_xbox.cmd](./start_gamesir_virtual_xbox.cmd)。在启动器中按 `Ctrl+Z`，或运行 `stop_gamesir_virtual_xbox.cmd`，即可停止本会话并恢复原生 GameSir。
+## 为什么采用这套方案
 
-完整的首次配置与排障请见 [gamesir_virtual_xbox_runbook.md](./gamesir_virtual_xbox_runbook.md)。
+Steam 对裸 vJoy 的 DirectInput 绑定体验不稳定，而 XInput 不能额外暴露四个独立背键。本项目因此把背键转换为 A/B/X/Y、十字键、肩键、Start/Back 等标准 Xbox 输入，并通过 HidHide 避免游戏同时识别实体与虚拟两只手柄。
 
-## 首次配置
+当前不支持震动回传。实体 Home/西瓜键也尚未验证，不作为安装成功条件。
 
-### 1. 安装依赖
+## 使用要求
 
-自行安装以下组件，并重新打开终端或资源管理器后再运行启动器：
+- Windows 与 GameSir G7 Pro。
+- GameSir Nexus：将 P1/P2/P3/P4 设置为 `F9`/`F10`/`F11`/`F12`。
+- Node.js：需能在命令行执行 `node --version`。
+- AutoHotkey v2 x64：日常必须使用 HidHide 白名单中的 `AutoHotkey64.exe`。
+- vJoy 2.1.9.1：Device 1 使用 18 个按钮、6 个轴和 1 个 POV。
+- ViGEmBus、HidHide、XOutput。
+- XOutput 的 Controller 必须只读取 `vJoy Device`，不能混用 Keyboard 或实体 GameSir。
 
-- Node.js（需能在命令行执行 `node --version`）
-- AutoHotkey v2 x64
-- vJoy 2.1.9.1：Device 1 配置为 **18 buttons / X,Y,Z,Rx,Ry,Rz / 1 Continuous POV**
-- ViGEmBus
-- HidHide
-- XOutput
-- GameSir Nexus
+驱动和第三方工具不随仓库分发。首次安装、精确配置和验收步骤全部见 [运行手册](./gamesir_virtual_xbox_runbook.md)。不要复制其他电脑的 HidHide 设备实例路径。
 
-XOutput、HidHide 等安装程序和驱动不随仓库分发；请从各项目官方发布渠道取得。
+## 日常使用
 
-### 2. 指定工具位置（仅在自动发现失败时）
+1. 连接 GameSir，双击 [start_gamesir_virtual_xbox.cmd](./start_gamesir_virtual_xbox.cmd)。
+2. 首次默认会打开配置中心。右上角取消“每次启动时打开配置中心”后，后续启动不会打开网页；需要时可在启动器窗口按 `Ctrl+I`。
+3. 在 XOutput 的 `Game Controllers` 中确认目标 Controller 按钮显示 `Stop`。仅有 XOutput 进程不代表虚拟 Xbox 已开始输出。
+4. 结束游戏后在启动器窗口按 `Ctrl+Z`，或运行 [stop_gamesir_virtual_xbox.cmd](./stop_gamesir_virtual_xbox.cmd)。
 
-启动器会从 `PATH` 查找 Node，并自动尝试常见的 AHK、vJoy、XOutput、HidHide 路径。若你的安装位置不同，在启动器所在的同一个 PowerShell 窗口设置以下环境变量后运行 `.cmd`：
+配置中心默认仅监听 `http://127.0.0.1:3780`，不提供局域网或远程访问。
+
+配置中心可在右上角切换中文/English。启动器和停止器默认使用中文；在启动前设置 `$env:GAMESIR_LANG = 'en'` 可使用英文控制台语料。
+
+## 文件与目录
+
+| 文件或目录 | 作用 |
+| --- | --- |
+| `start_gamesir_virtual_xbox.cmd` / `.ps1` | 启动或复用本会话的配置服务、AHK 和 XOutput，并开启 HidHide cloak。 |
+| `stop_gamesir_virtual_xbox.cmd` / `.ps1` | 只停止本会话拥有的组件，再安全关闭 cloak。 |
+| `gamesir_merge_vjoy_f9_f12.ahk` | AHK v2 输入合并、背键动作和宏执行器。 |
+| `app/server/` | 本地配置、状态、生命周期和 WebSocket 服务。 |
+| `app/web/` | 浏览器配置中心。 |
+| `runtime/` | 本机首次运行时生成的配置、状态、日志与备份；不应提交到 Git。 |
+| `gamesir_virtual_xbox_runbook.md` | 面向用户和 Agent 的完整配置、验收与排障手册。 |
+| `AGENTS.md` | Agent 修改本项目时必须遵守的实现边界。 |
+
+## 路径自动发现
+
+启动器从 `PATH` 查找 Node.js，并尝试常见的 AHK、vJoy、XOutput 和 HidHide 路径。自动发现失败时，在同一个 PowerShell 窗口设置：
 
 ```powershell
 $env:GAMESIR_AHK_EXE = 'C:\path\to\AutoHotkey64.exe'
@@ -46,49 +66,14 @@ $env:GAMESIR_HIDHIDE_CLI = 'C:\path\to\HidHideCLI.exe'
 .\start_gamesir_virtual_xbox.cmd
 ```
 
-这些变量可按你的 Windows 环境持久化；不要把本机绝对路径提交到仓库。
+不要把本机绝对路径或 XOutput 的用户配置提交到仓库。
 
-### 3. 配置 Nexus、HidHide 与 XOutput
+## 开发验证
 
-1. 在 GameSir Nexus 将四个背键设为 `F9`、`F10`、`F11`、`F12`。
-2. 在 HidHide 中隐藏本机实际枚举出的 GameSir 游戏接口；将 **AutoHotkey64.exe** 加入白名单，**不要**将 XOutput 加入白名单。设备实例路径因电脑和手柄而异，不能复制他人的 `USB\...` 路径。
-3. 打开 XOutput，创建或编辑 `Controller`。所有输入都必须来自 `vJoy Device`，不得混用 Keyboard 或实体 GameSir。
-4. 在 XOutput 中将 `LX/LY/RX/RY/LT/RT` 分别学习为 vJoy 的 `X/Y/Rx/Ry/Z/Rz`；四个十字键均学习 vJoy 的 `DPad1` 四个方向；标准按钮也仅学习 vJoy。保持 `LY`、`RY` 的 `Invert` 关闭。Home/西瓜键当前未支持，保持未绑定。
-5. 保存 XOutput 配置，点击 `Controller` 的 `Start`。按钮变成 `Stop` 才说明虚拟 Xbox 正在输出。
-
-## 验收
-
-1. 运行启动器；在浏览器打开 `http://127.0.0.1:3780`。页面会自动检测 XInput 槽位：未连接项和已确认的 XOutput 虚拟手柄会置灰并显示原因；只有一个实体候选时会自动选择。若存在多个实体候选，点击“识别实体手柄（移动摇杆）”并按页面提示操作 GameSir。
-2. 完成“检查环境”和四个背键验证。
-3. 用 JoyMonitor 确认 vJoy 的摇杆松手居中、四个方向正确，且四背键分别改变 POV 的上、下、左、右。
-4. 在 XOutput 右侧预览确认实体按键、摇杆和背键都有响应，且 Controller 显示 `Stop`。
-5. 完全退出并重新打开 Steam 或游戏，确认只识别虚拟 Xbox，而不识别实体 GameSir。
-
-## 当前限制
-
-- Home/西瓜键尚未验证能从实体 GameSir 通过当前 XInput 链路输出；不作为安装成功条件。
-- Force Feedback / 震动不会回传到实体 GameSir。
-- XOutput 配置属于用户本机配置，仓库不会覆盖或分发它。
-
-## vJoy 标准按钮编号
-
-这是工程内唯一维护的动作编号表；新用户不需要手动编辑它。XOutput 首次学习时应得到以下对应关系：
-
-| Xbox 动作 | vJoy Button |
-| --- | ---: |
-| A / B / X / Y | 1 / 2 / 3 / 4 |
-| Start / Back | 5 / 6 |
-| LS / RS | 7 / 8 |
-| LB / RB | 9 / 10 |
-
-实体手柄转发和配置中心的单次、按住、连发、宏都使用同一张表；不要根据旧配置重新调换这些编号。
-
-## 开发与测试
-
-本项目没有 npm 第三方依赖。运行自动化测试：
+本项目没有 npm 第三方依赖：
 
 ```powershell
 node --test app/server/*.test.mjs
 ```
 
-维护映射、HidHide 或启动链路前，请先阅读 [AGENTS.md](./AGENTS.md) 与运行手册。
+修改映射、启动、vJoy、XOutput 或 HidHide 链路前，必须先阅读 [AGENTS.md](./AGENTS.md) 和完整运行手册。

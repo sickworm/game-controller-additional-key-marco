@@ -72,6 +72,14 @@ test("device setting is validated and emitted in the executor snapshot", async (
   assert.match(await readFile(path.join(root, "runtime", "executor-config.ini"), "utf8"), /xinputUser=2/);
 });
 
+test("UI preferences default to opening the center and persist changes", async (t) => {
+  const { root, store } = await fixture(); t.after(() => rm(root, { recursive: true, force: true }));
+  assert.equal((await store.readUiPreferences()).openConfigurationCenterOnStartup, true);
+  await store.saveUiPreferences({ openConfigurationCenterOnStartup: false });
+  assert.equal((await store.readUiPreferences()).openConfigurationCenterOnStartup, false);
+  await assert.rejects(() => store.saveUiPreferences({ openConfigurationCenterOnStartup: "no" }), (error) => error.code === "INVALID_UI_PREFERENCES");
+});
+
 test("device setting rolls back when publishing the executor snapshot fails", async (t) => {
   const { root, store } = await fixture(); t.after(() => rm(root, { recursive: true, force: true }));
   const publishActive = store.publishActive.bind(store);

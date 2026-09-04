@@ -5,7 +5,7 @@ let macroDiagnosticsOpen = false;
 const captureWaiters = new Map();
 const elements = { profiles: document.querySelector("#profiles"), bindings: document.querySelector("#bindings"), save: document.querySelector("#save"), state: document.querySelector("#save-state"), preflight: document.querySelector("#preflight-result"), macroDiagnostics: document.querySelector("#macro-diagnostics"), macroLastEvent: document.querySelector("#macro-last-event"), macroActiveActions: document.querySelector("#macro-active-actions"), macroTraces: document.querySelector("#macro-traces"), xoutputProtection: document.querySelector("#xoutput-protection"), xoutputProtectionStatus: document.querySelector("#xoutput-protection-status"), xoutputProtectionActions: document.querySelector("#xoutput-protection-actions"), xoutputBackups: document.querySelector("#xoutput-backups") };
 
-await load(); probeXinputSlots(); connect();
+await load(); await loadUiPreferences(); probeXinputSlots(); connect();
 document.querySelector("#save").addEventListener("click", save);
 document.querySelector("#new-profile").addEventListener("click", createProfile);
 document.querySelector("#rename-profile").addEventListener("click", renameProfile);
@@ -17,6 +17,7 @@ document.querySelector("#probe-xinput").addEventListener("click", probeXinputSlo
 document.querySelector("#detect-physical-xinput").addEventListener("click", detectPhysicalXinput);
 elements.profiles.addEventListener("change", async () => { await api(`/api/profiles/${elements.profiles.value}/activate`, { method: "POST" }); await load(); });
 document.querySelector("#xinput-user").addEventListener("change", saveDeviceSettings);
+document.querySelector("#open-on-startup").addEventListener("change", saveUiPreferences);
 
 async function load() {
   const [status, index, sourceData] = await Promise.all([api("/api/status"), api("/api/profiles"), api("/api/input-sources")]);
@@ -25,8 +26,26 @@ async function load() {
   elements.profiles.replaceChildren(...index.profiles.map((item) => option(item.id, item.name, item.id === activeProfileId)));
   profile = await api(`/api/profiles/${activeProfileId}`);
   updateStatus(status);
+  if (status.preflight) showPreflight(status.preflight);
   dirty = false;
   render();
+}
+
+async function loadUiPreferences() {
+  const preferences = await api("/api/ui-preferences");
+  document.querySelector("#open-on-startup").checked = preferences.openConfigurationCenterOnStartup;
+}
+
+async function saveUiPreferences(event) {
+  const checkbox = event.target;
+  checkbox.disabled = true;
+  try {
+    const preferences = await api("/api/ui-preferences", { method: "PUT", body: { openConfigurationCenterOnStartup: checkbox.checked } });
+    elements.state.textContent = preferences.openConfigurationCenterOnStartup ? "以后启动时会打开配置中心" : "以后启动时不再自动打开配置中心，可按 Ctrl+I 手动打开";
+  } catch (error) {
+    checkbox.checked = !checkbox.checked;
+    elements.state.textContent = error.message;
+  } finally { checkbox.disabled = false; }
 }
 
 function render() {
@@ -162,7 +181,9 @@ function showPreflight(report) {
   const slot = checks.find((check) => check.name === "GameSir XInput slot");
   const keys = Object.entries(report.inputVerification ?? {});
   const allKeysVerified = keys.length > 0 && keys.every(([, check]) => check.status === "pass");
-  const nodes = [Object.assign(document.createElement("h2"), { textContent: report.status === "passed" ? "设置完成：可使用虚拟 Xbox" : "按以下步骤完成设置" })];
+  const heading = Object.assign(document.createElement("h2"), { textContent: report.status === "passed" ? "设置完成：可使用虚拟 Xbox" : "按以下步骤完成设置" });
+  const runbook = Object.assign(document.createElement("a"), { href: window.gamesirI18n?.locale === "en" ? "/runbook.en" : "/runbook", target: "_blank", rel: "noopener", textContent: "打开完整配置与排障手册" });
+  const nodes = [heading, runbook];
   if (slot?.status === "fail") nodes.push(Object.assign(document.createElement("p"), { className: "blocking", textContent: "阻断：AHK 未连接到实体 GameSir，背键验证不会收到任何按键。请在上方选择实体槽位并保存，然后点击“重新检测槽位”，直到状态显示“实体已连接”。" }));
   const checkTitle = Object.assign(document.createElement("h3"), { textContent: "第 1 步：设备与执行链路" });
   nodes.push(checkTitle, list(checks.map((check) => `${check.name}: ${check.detail}`), checks.map((check) => check.status)));
@@ -198,7 +219,7 @@ function addMacroStep(row, kind, step = {}, userAdded = false) { const list = ro
 function moveMacroStep(row, line, direction) { const sibling = direction < 0 ? line.previousElementSibling : line.nextElementSibling; if (!sibling) return; if (direction < 0) sibling.before(line); else sibling.after(line); renumberMacro(row); dirty = true; elements.state.textContent = "有未保存修改"; }
 function renumberMacro(row) { row.querySelectorAll(".macro-step span").forEach((item, index) => { item.textContent = String(index + 1); }); }
 function readMacro(row) { const steps = []; for (const line of row.querySelectorAll(".macro-step")) { const kind = line.dataset.kind; steps.push(kind === "wait" ? { kind, durationMs: Number(line.querySelector(".macro-wait").value) } : { kind, input: line.querySelector(".macro-input").value }); } return steps; }
-async function api(path, options = {}) { const response = await fetch(path, { ...options, headers: { "Content-Type": "application/json" }, body: options.body ? JSON.stringify(options.body) : undefined }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message ?? "请求失败"); return payload.data; }
+async function api(path, options = {}) { const response = await fetch(path, { ...options, headers: { "Content-Type": "application/json" }, body: options.body ? JSON.stringify(options.body) : undefined }); const payload = await response.json(); if (!response.ok) throw new Error(window.gamesirI18n?.translate(payload.error?.message ?? "请求失败") ?? payload.error?.message ?? "请求失败"); return payload.data; }
 function updateStatus(status) {
   const ahk = status.ahk;
   const ahkNode = document.querySelector("#ahk-status");

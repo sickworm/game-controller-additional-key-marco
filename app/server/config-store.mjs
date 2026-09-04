@@ -38,6 +38,7 @@ export class ConfigStore {
     this.deviceSettingsPath = path.join(this.runtimeDir, "device-settings.json");
     this.transactionPath = path.join(this.runtimeDir, "configuration-transaction.json");
     this.preflightPath = path.join(this.runtimeDir, "preflight-status.json");
+    this.uiPreferencesPath = path.join(this.runtimeDir, "ui-preferences.json");
     this.writeQueue = Promise.resolve();
   }
 
@@ -83,6 +84,30 @@ export class ConfigStore {
     const sources = await this.readSources();
     const snapshot = await this.readJson(this.activePath, null);
     return { activeProfile: active.profile, activeRevision: snapshot?.revision ?? active.revision, sources: sources.sources, device: await this.readDeviceSettings() };
+  }
+
+  async readUiPreferences() {
+    const data = await this.readJson(this.uiPreferencesPath, null);
+    if (!data) {
+      const defaults = { schemaVersion: 1, openConfigurationCenterOnStartup: true };
+      await this.writeJsonAtomic(this.uiPreferencesPath, defaults);
+      return defaults;
+    }
+    if (data.schemaVersion !== 1 || typeof data.openConfigurationCenterOnStartup !== "boolean") {
+      throw new ConfigError("INVALID_UI_PREFERENCES", "配置中心启动偏好无效。", 500);
+    }
+    return data;
+  }
+
+  async saveUiPreferences(candidate) {
+    return this.withWriteLock(async () => {
+      if (typeof candidate?.openConfigurationCenterOnStartup !== "boolean") {
+        throw new ConfigError("INVALID_UI_PREFERENCES", "启动偏好必须为 true 或 false。");
+      }
+      const next = { schemaVersion: 1, openConfigurationCenterOnStartup: candidate.openConfigurationCenterOnStartup };
+      await this.writeJsonAtomic(this.uiPreferencesPath, next);
+      return next;
+    });
   }
 
   async readDeviceSettings() {

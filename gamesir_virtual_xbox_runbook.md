@@ -1,5 +1,28 @@
 ﻿# GameSir G7 Pro 背键转虚拟 Xbox 手柄运行手册
 
+[简体中文](./gamesir_virtual_xbox_runbook.md) | [English](./gamesir_virtual_xbox_runbook.en.md)
+
+## 如何使用本手册
+
+本文同时面向首次配置用户和维护 Agent。每个关键步骤都应按“目标 → 操作 → 通过标准 → 失败检查 → 禁止操作”执行；不得因为进程存在、旧缓存或未经验证的设备编号而跳过通过标准。
+
+### 首次配置总流程
+
+| 顺序 | 目标 | 通过标准 | 详细章节 |
+| ---: | --- | --- | --- |
+| 1 | 安装依赖 | Node、AHK v2 x64、vJoy、ViGEmBus、HidHide、XOutput、Nexus 均可用 | [工具路径与跨电脑配置](#工具路径与跨电脑配置) |
+| 2 | 配置 Nexus | P1-P4 分别输出 F9-F12 | [修改 Nexus 输出](#修改-nexus-输出) |
+| 3 | 配置 vJoy | Device 1 有 18 buttons、6 axes、1 POV | [vJoy Device 1 必要配置](#vjoy-device-1-必要配置) |
+| 4 | 配置 HidHide | 实体游戏接口被隐藏，AHK 在白名单，XOutput 不在白名单 | [HidHide 当前配置](#hidhide-当前配置) |
+| 5 | 配置 XOutput | 所有标准输入均来自 vJoy Device，Controller 显示 Stop | [首次配置 XOutput](#首次配置-xoutputvjoy-输入方案) |
+| 6 | 选择实体槽位 | AHK 状态显示实体 GameSir 已连接 | [本地配置中心](#本地配置中心首版) |
+| 7 | 验证背键 | P1-P4 分别收到 F9-F12 | [映射验证](#映射验证) |
+| 8 | 最终验收 | 游戏只看到虚拟 Xbox，标准输入与背键均有效 | [映射验证](#映射验证) |
+
+**失败检查：** 优先查看配置中心的阻断项和本手册的故障排查表；需要时重新运行“检查环境”。
+
+**禁止操作：** 不要为排障直接关闭 HidHide，不要猜测并隐藏无关 `MI_*` 接口，不要覆盖用户已有的 XOutput `settings.json`，不要把 XOutput 加入 HidHide 白名单。
+
 ## 方案目标
 
 > 当前用户选择为虚拟 Xbox/XInput 模式：日常运行会启动 XOutput，游戏目标设备是它创建的虚拟 Xbox 控制器。vJoy 只作为 AHK 的中间输入设备。
@@ -48,7 +71,7 @@ AHK 会根据 vJoy 设备实际的轴范围转换 XInput 摇杆值，并在写�
 
 1. 连接或开启 GameSir 手柄。
 2. 双击运行 `D:\GitHub\game-controller-additional-key-marco\start_gamesir_virtual_xbox.cmd`。
-3. 启动器会先开启 HidHide 的 cloak，再自动启动 AHK、XOutput，并执行环境检查和一次实体 XInput 槽位探测。若只发现一个实体候选槽位，会自动保存该选择；若未发现或发现多个候选，则保留原选择并在控制台说明。启动器控制台会在启动时、以及状态变化时记录 AHK 执行器、实体 GameSir XInput 与 XOutput 的连接/断开状态，不会持续刷屏。默认不打开网页；在启动器窗口按 `Ctrl+I` 可打开配置中心。
+3. 启动器会先开启 HidHide 的 cloak，再自动启动 AHK、XOutput，并执行环境检查和一次实体 XInput 槽位探测。若只发现一个实体候选槽位，会自动保存该选择；若未发现或发现多个候选，则保留原选择并在控制台说明。启动器控制台会在启动时、以及状态变化时记录 AHK 执行器、实体 GameSir XInput 与 XOutput 的连接/断开状态，不会持续刷屏。配置中心首次默认自动打开；不需要日常打开时，在页面右上角取消“每次启动时打开配置中心”。无论该选项是否开启，都可在启动器窗口按 `Ctrl+I` 手动打开。
 4. 完成四个背键验证。在 XOutput 中确认输入设备列表中存在 `vJoy Device`，并在 `Game Controllers` 区域选择已保存的 `Controller` 条目；显示 `Stop` 表示虚拟 Xbox 已启动。
 5. `Start` 变为 `Stop` 后即可开启游戏；配置页面不要求额外点击确认按钮。
 
@@ -80,6 +103,8 @@ http://127.0.0.1:3780
 ```
 
 页面可管理配置档，并配置四个逻辑背键的键盘来源与单次、按住、连发、宏 Xbox 动作。首次来源为 `F9`、`F10`、`F11`、`F12`；如果在 GameSir Nexus 中改动了背键键盘输出，点击对应“识别”或预检中的“验证”，平台会立即同步识别到的 F 键。来源是设备级设置，不随游戏配置档切换。
+
+右上角“每次启动时打开配置中心”默认勾选，修改后立即原子保存到本机 `runtime/ui-preferences.json`。该选项只控制浏览器是否自动打开，不会跳过环境检查，也不会改变 AHK、XOutput 或 HidHide 的启动行为。
 
 点击“检查环境”会启动或复用本会话的 AHK 与 XOutput，再检查 AHK、vJoy、ViGEmBus、HidHide、运行时配置与选定的 GameSir XInput 槽位。检查不会关闭 HidHide、修改白名单、安装驱动或修改 Nexus。检查结果要求用户继续完成四个实体背键与 XOutput 输出的确认；在实际完成前不要将“等待人工验证”当作通过。
 

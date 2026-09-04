@@ -85,7 +85,21 @@ setInterval(() => flushCaptureResults().catch(() => {}), 250).unref();
 async function route(request, response, requestId) {
   const url = new URL(request.url, "http://127.0.0.1");
   if (request.method === "GET" && url.pathname === "/health") return json(response, 200, { data: { status: "ok", address: `127.0.0.1:${port}` } });
+  if (request.method === "GET" && url.pathname === "/runbook") {
+    response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+    return response.end(await readFile(path.join(rootDir, "gamesir_virtual_xbox_runbook.md")));
+  }
+  if (request.method === "GET" && url.pathname === "/runbook.en") {
+    response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+    return response.end(await readFile(path.join(rootDir, "gamesir_virtual_xbox_runbook.en.md")));
+  }
   if (request.method === "GET" && url.pathname === "/api/status") return json(response, 200, { data: await fullStatus() });
+  if (request.method === "GET" && url.pathname === "/api/ui-preferences") return json(response, 200, { data: await store.readUiPreferences() });
+  if (request.method === "PUT" && url.pathname === "/api/ui-preferences") {
+    const preferences = await store.saveUiPreferences(await body(request));
+    broadcast("preferences.changed", preferences);
+    return json(response, 200, { data: preferences });
+  }
   if (request.method === "POST" && url.pathname === "/api/configuration/save") {
     const payload = await body(request);
     const saved = await store.saveConfiguration(payload);
@@ -228,6 +242,7 @@ async function fullStatus() {
     ahk: { ...ahk, ownership: ahkOwnership.ownership, pid: ahkOwnership.pid, startedAt: ahkOwnership.startedAt },
     xoutput,
     xoutputConfiguration: await xoutputConfigurationStatus(),
+    preflight: await store.readLatestPreflight(),
   };
 }
 
@@ -593,7 +608,7 @@ async function recoverRuntimeSession() {
     if (!record) continue;
     if (!await matchingProcess(record)) delete session.processes[key];
   }
-  session.service = { pid: process.pid, executable: process.execPath, startedAt: new Date().toISOString() };
+  session.service = { pid: process.pid, executable: process.execPath, port, startedAt: new Date().toISOString() };
   session.updatedAt = new Date().toISOString();
   await writeJsonAtomic(sessionPath, session);
   return session;

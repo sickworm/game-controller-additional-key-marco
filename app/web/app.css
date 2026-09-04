@@ -6,6 +6,8 @@ body { margin: 0; min-width: 320px; }
 .topbar strong { font-size: 16px; letter-spacing: 0; margin-right: 11px; }.topbar span { color: #aebdc3; font-size: 14px; }
 .connection { font-size: 13px; }.connection.online { color: #83d1a5; }.connection.offline { color: #ffb4a6; }
 .topbar-actions { display: flex; align-items: center; gap: 14px; }
+.startup-preference { display: flex; align-items: center; gap: 6px; color: #c5d1d5; font-size: 13px; white-space: nowrap; }
+.startup-preference input { min-height: auto; width: 16px; height: 16px; margin: 0; padding: 0; }
 .language-toggle { min-height: 30px; padding: 4px 10px; font-size: 13px; background: transparent; }
 main { max-width: 1240px; margin: 0 auto; padding: 20px 24px 48px; }
 .status-strip { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #334149; background: #172026; }

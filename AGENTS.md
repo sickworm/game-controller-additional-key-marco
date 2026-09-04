@@ -2,6 +2,8 @@
 
 ## 项目目标
 
+本文是 Agent 进入本项目时的首要实现边界。面向用户的背景、要求与文件说明见 `README.md`；任何首次配置、人工验收或排障操作必须完整阅读 `gamesir_virtual_xbox_runbook.md`，不得仅根据本文摘要操作设备链路。
+
 本项目为 GameSir G7 Pro 的四个背键提供可配置的虚拟 Xbox/XInput 动作。现有稳定链路如下：
 
 ```text

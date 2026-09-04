@@ -1,4 +1,6 @@
 ﻿$ErrorActionPreference = 'Stop'
+$language = if ($env:GAMESIR_LANG -eq 'en') { 'en' } else { 'zh-CN' }
+function L([string]$zh, [string]$en) { if ($language -eq 'en') { $en } else { $zh } }
 $root = $PSScriptRoot
 $port = if ($env:PORT) { [int]$env:PORT } else { 3780 }
 $baseUrl = "http://127.0.0.1:$port"
@@ -27,21 +29,21 @@ function Show-StartupError([string]$reason) {
 
 function Write-CoreRuntimeStatus($state, [switch]$Force) {
   if ($null -eq $state) {
-    $key = 'service=unavailable'
-    if (-not $Force -and $script:lastCoreStatusKey -eq $key) { return }
-    $script:lastCoreStatusKey = $key
-    Write-Host "  [$((Get-Date).ToString('HH:mm:ss'))] 状态服务：不可用" -ForegroundColor Red
+    # A single timeout is not a service outage.  The status endpoint performs
+    # several process/configuration checks and can occasionally exceed the
+    # short polling timeout, especially while the browser opens.  Keep the
+    # last known state and only report an outage after the caller's debounce.
     return
   }
-  $ahk = switch ($state.ahk.status) { 'running' { '运行中' } 'degraded' { '配置异常' } default { '未运行' } }
-  $input = if ($state.ahk.inputState -eq 'connected') { '已连接' } else { '已断开' }
-  $xoutput = if ($state.xoutput.status -eq 'running') { '运行中' } else { '未运行' }
+  $ahk = switch ($state.ahk.status) { 'running' { L '运行中' 'running' } 'degraded' { L '配置异常' 'configuration error' } default { L '未运行' 'not running' } }
+  $input = if ($state.ahk.inputState -eq 'connected') { L '已连接' 'connected' } else { L '已断开' 'disconnected' }
+  $xoutput = if ($state.xoutput.status -eq 'running') { L '运行中' 'running' } else { L '未运行' 'not running' }
   $key = "ahk=$($state.ahk.status);input=$($state.ahk.inputState);xoutput=$($state.xoutput.status)"
   if (-not $Force -and $script:lastCoreStatusKey -eq $key) { return }
   $script:lastCoreStatusKey = $key
   $stamp = (Get-Date).ToString('HH:mm:ss')
-  Write-Host "  [$stamp] AHK 执行器：$ahk"
-  Write-Host "  [$stamp] 实体 GameSir XInput：$input"
+  Write-Host "  [$stamp] $(L 'AHK 执行器' 'AHK executor')：$ahk"
+  Write-Host "  [$stamp] $(L '实体 GameSir XInput' 'Physical GameSir XInput')：$input"
   Write-Host "  [$stamp] XOutput：$xoutput"
 }
 
@@ -58,6 +60,8 @@ try {
     Start-Process -FilePath $nodePath -ArgumentList ('"' + $serverPath + '"') -WorkingDirectory $root -WindowStyle Hidden
   }
   Wait-ForService
+  $uiPreferences = (Invoke-RestMethod -TimeoutSec 3 "$baseUrl/api/ui-preferences").data
+  if ($uiPreferences.openConfigurationCenterOnStartup) { Start-Process "$baseUrl/" }
   try { Invoke-RestMethod -Method Post -TimeoutSec 20 "$baseUrl/api/runtime/check-environment" | Out-Null }
   catch {
     $reason = $_.Exception.Message
@@ -110,6 +114,7 @@ try {
   Write-Host '    Ctrl+Z         : stop virtual mode and return to native GameSir'
   Write-Host ''
   Write-Host '  Keep this window open while virtual mode is in use.'
+  if ($uiPreferences.openConfigurationCenterOnStartup) { Write-Host '  Configuration Center opened (change this in the top-right corner).' }
   Write-Host '======================================================================'
   $raw = $Host.UI.RawUI
   $script:lastCoreStatusKey = $null
@@ -117,6 +122,8 @@ try {
   Write-Host '  Core runtime log (prints only when status changes)'
   Write-CoreRuntimeStatus $state -Force
   $nextStatusPollAt = [DateTime]::UtcNow
+  $statusPollInFlight = $false
+  $statusFailures = 0
   while ($true) {
     if ($raw.KeyAvailable) {
       $key = $raw.ReadKey('NoEcho,IncludeKeyDown')
@@ -124,9 +131,22 @@ try {
       if ($ctrl -and $key.VirtualKeyCode -eq 73) { Start-Process "$baseUrl/"; Write-Host ''; Write-Host 'Configuration Center opened.' }
       if ($ctrl -and $key.VirtualKeyCode -eq 90) { break }
     }
-    if ([DateTime]::UtcNow -ge $nextStatusPollAt) {
-      try { Write-CoreRuntimeStatus (Invoke-RestMethod -TimeoutSec 1 "$baseUrl/api/status").data }
-      catch { Write-CoreRuntimeStatus $null }
+    if (-not $statusPollInFlight -and [DateTime]::UtcNow -ge $nextStatusPollAt) {
+      $statusPollInFlight = $true
+      try {
+        $polledState = (Invoke-RestMethod -TimeoutSec 3 "$baseUrl/api/status").data
+        $statusFailures = 0
+        Write-CoreRuntimeStatus $polledState
+      }
+      catch {
+        $statusFailures += 1
+        # Only surface a persistent outage; transient request timeouts remain
+        # invisible and do not replace the last known healthy status.
+        if ($statusFailures -eq 3) {
+          Write-Host "  [$((Get-Date).ToString('HH:mm:ss'))] $(L '状态服务：暂时不可用（连续 3 次检查失败）' 'Status service: temporarily unavailable (3 consecutive checks failed)')" -ForegroundColor Yellow
+        }
+      }
+      finally { $statusPollInFlight = $false }
       $nextStatusPollAt = [DateTime]::UtcNow.AddSeconds(1)
     }
     Start-Sleep -Milliseconds 50

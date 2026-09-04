@@ -15,6 +15,8 @@ test("HTTP and WebSocket server endpoints are loopback-safe", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "gamesir-server-"));
   const port = await availablePort();
   await cp(path.join(projectRoot, "app", "web"), path.join(root, "app", "web"), { recursive: true });
+  await cp(path.join(projectRoot, "gamesir_virtual_xbox_runbook.md"), path.join(root, "gamesir_virtual_xbox_runbook.md"));
+  await cp(path.join(projectRoot, "gamesir_virtual_xbox_runbook.en.md"), path.join(root, "gamesir_virtual_xbox_runbook.en.md"));
   const xoutputDir = path.join(root, "tools", "XOutput");
   const xoutputExe = path.join(xoutputDir, "XOutput.exe");
   const xoutputSettings = path.join(xoutputDir, "settings.json");
@@ -36,8 +38,12 @@ test("HTTP and WebSocket server endpoints are loopback-safe", async (t) => {
   assert.equal(status.json.data.service.ownership, "managed");
   assert.equal(status.json.data.xoutputConfiguration.status, "protected");
   assert.equal(status.json.data.xoutputConfiguration.backups.length, 1);
+  assert.equal((await request(port, "/api/ui-preferences")).json.data.openConfigurationCenterOnStartup, true);
+  const preferences = await request(port, "/api/ui-preferences", {}, "PUT", { openConfigurationCenterOnStartup: false });
+  assert.equal(preferences.json.data.openConfigurationCenterOnStartup, false);
   const session = JSON.parse(await readFile(path.join(root, "runtime", "runtime-session.json"), "utf8"));
   assert.equal(session.service.pid, child.pid);
+  assert.equal(session.service.port, port);
   assert.deepEqual(session.processes, {});
 
   const blockedStart = await request(port, "/api/runtime/start", {}, "POST");
@@ -47,7 +53,14 @@ test("HTTP and WebSocket server endpoints are loopback-safe", async (t) => {
   assert.equal(page.status, 200);
   assert.match(page.text, /GameSir G7 Pro/);
   assert.match(page.text, /id="language-toggle"/);
+  assert.match(page.text, /id="open-on-startup"/);
   assert.match(page.text, /src="\/i18n\.js"/);
+  const runbook = await request(port, "/runbook");
+  assert.equal(runbook.status, 200);
+  assert.match(runbook.text, /首次配置总流程/);
+  const englishRunbook = await request(port, "/runbook.en");
+  assert.equal(englishRunbook.status, 200);
+  assert.match(englishRunbook.text, /First-time setup flow/);
   const translations = await request(port, "/i18n.js");
   assert.equal(translations.status, 200);
   assert.match(translations.text, /gamesir-config-language/);
