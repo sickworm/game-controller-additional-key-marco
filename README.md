@@ -1,22 +1,46 @@
-# GameSir G7 Pro 背键 → 虚拟 Xbox
-
 [简体中文](./README.md) | [English](./README.en.md)
 
-本项目让 GameSir G7 Pro 的四个背键执行可配置的标准 Xbox/XInput 动作，同时让游戏只看到一只虚拟 Xbox 手柄。
+# 小鸡 G7 Pro / GameSir G7 Pro 支持宏定义
+
+![screen](doc/screen_cn.png)
+
+# 项目介绍
+
+GameSir G7 Pro 是 XBox 授权的手柄，无法配置宏按键。本项目让 GameSir G7 Pro 的四个背键执行可配置的标准 Xbox/XInput 动作。方案理论上适用于所有 XBox 授权的带背键的手柄，我只有 GameSir G7 Pro 没有进行其他测试。
+
+方案：
 
 ```text
-GameSir Nexus（背键输出 F9-F12）
-  → AutoHotkey（合并实体输入与背键动作）
-  → vJoy Device 1
-  → XOutput
+官方软件 GameSir Nexus（配置背键输出 F9-F12）
+  → AutoHotkey（接收手柄普通输出 + 背键输出的 F9-F12，合并实体输入与背键动作，转发给 vJoy）
+  → vJoy Device 1（合并后的虚拟设备，XOutput 无法直接接收物理手柄的 F9-F12）
+  → XOutput（转换为可以被 Steam 直接识别的手柄，没有这一层 vJoy 需要在 Steam 配置按键）
   → 虚拟 Xbox/XInput 手柄
+
+HidHide → 隐藏物理手柄，避免输入冲突
 ```
 
-## 为什么采用这套方案
+## 每个软件的作用
 
-Steam 对裸 vJoy 的 DirectInput 绑定体验不稳定，而 XInput 不能额外暴露四个独立背键。本项目因此把背键转换为 A/B/X/Y、十字键、肩键、Start/Back 等标准 Xbox 输入，并通过 HidHide 避免游戏同时识别实体与虚拟两只手柄。
+官方软件 GameSir Nexus：把背键配置为键盘按键。
+AutoHotKey：接收手柄和键盘的输入，统一转到 vJoy 虚拟手柄。
+vJoy：合并输出为一个手柄按键。
+XOutput：转换为可直接使用的 XBox 虚拟手柄；
 
-当前不支持震动回传。实体 Home/西瓜键也尚未验证，不作为安装成功条件。
+### Q: 为什么不直接手柄 -> XOutput
+因为发现 XOutput 不认手柄的 F9-F12
+
+### Q：为什么不直接 vJoy -> Steam 游戏
+因为发现 vJoy 需要在 Steam 上进行按键绑定，且绑定体验不好
+
+### Q：为什么需要 HideHide
+不隐藏物理手柄，会出现抢输入的情况
+
+### Q：是否支持震动
+实测支持震动。vJoy 和 XOutput 都需要设置 force feedback。
+
+### Q：是否可以绑定 Home/西瓜键
+实体 Home/西瓜键无法绑定到 XOutput，但实际上在游戏中可响应。
 
 ## 使用要求
 

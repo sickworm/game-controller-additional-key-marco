@@ -1,22 +1,57 @@
-# GameSir G7 Pro Back Buttons → Virtual Xbox Controller
-
 [简体中文](./README.md) | [English](./README.en.md)
 
-This project turns the four GameSir G7 Pro back buttons into configurable standard Xbox/XInput actions while exposing only one virtual Xbox controller to games.
+# GameSir G7 Pro Buttons Supports Macro
+
+![Screenshot](doc/screen_en.png)
+
+# Introduction
+
+The GameSir G7 Pro is an officially licensed Xbox controller, but it does not support configurable macros. This project turns its four back buttons into configurable standard Xbox/XInput actions. In theory, this approach should work with any officially licensed Xbox controller that has back buttons, but it has only been tested with the GameSir G7 Pro.
+
+How it works:
 
 ```text
-GameSir Nexus (back buttons output F9-F12)
-  → AutoHotkey (merges physical input and back-button actions)
-  → vJoy Device 1
-  → XOutput
+Official GameSir Nexus software (configures the back buttons to output F9-F12)
+  → AutoHotkey (receives standard controller input and F9-F12 from the back buttons,
+    merges them, and forwards the result to vJoy)
+  → vJoy Device 1 (the merged virtual device; XOutput cannot directly receive
+    F9-F12 from the physical controller)
+  → XOutput (converts vJoy into a controller Steam can recognize directly;
+    without this layer, vJoy buttons must be bound manually in Steam)
   → Virtual Xbox/XInput controller
+
+HidHide → Hides the physical controller to prevent input conflicts
 ```
 
-## Why this design
+## What each application does
 
-Steam does not provide a reliable binding experience for raw vJoy DirectInput devices, and XInput cannot expose four additional independent back buttons. This project therefore maps the back buttons to standard Xbox inputs such as A/B/X/Y, D-pad directions, shoulder buttons, Start, and Back. HidHide prevents games from seeing both the physical and virtual controllers.
+GameSir Nexus: Configures the back buttons as keyboard keys.
 
-Rumble passthrough is not currently supported. The physical Home/Guide button is also unverified and is not an installation acceptance requirement.
+AutoHotkey: Receives controller and keyboard input and forwards it through the vJoy virtual controller.
+
+vJoy: Merges the inputs into a single controller.
+
+XOutput: Converts the merged device into a ready-to-use virtual Xbox controller.
+
+### Q: Why not connect the controller directly to XOutput?
+
+XOutput does not recognize the controller's F9-F12 back-button outputs.
+
+### Q: Why not use vJoy directly in Steam games?
+
+vJoy requires manual button binding in Steam, and the binding experience is poor.
+
+### Q: Why is HidHide needed?
+
+Without hiding the physical controller, its input can conflict with the virtual controller.
+
+### Q: Is rumble supported?
+
+Rumble has been tested and works. Force feedback must be configured in both vJoy and XOutput.
+
+### Q: Can the Home/Guide button be mapped?
+
+The physical Home/Guide button cannot be bound in XOutput, but it still responds in games.
 
 ## Requirements
 
